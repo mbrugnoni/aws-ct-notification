@@ -1,22 +1,141 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Solution to check RSS feed and send notifications for Control Tower updates and new account creations.
+Description: Control Tower Notification solution for easily setting up alerts for Control Tower events
 
 Parameters:
   NotificationEmail:
     Type: String
-    Description: Email address to receive notifications
-    AllowedPattern: '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-    ConstraintDescription: Must be a valid email address
+    Description: Comma-separated list of email addresses to receive notifications
+    AllowedPattern: '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(,[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})*$'
+    ConstraintDescription: Must be a comma-separated list of valid email addresses
 
 Resources:
-
-  # SNS Topic
+  # SNS Topics (without subscriptions)
   CTAlertTopic:
     Type: "AWS::SNS::Topic"
     Properties: 
-      Subscription:
-        - Endpoint: !Ref NotificationEmail
-          Protocol: "email"
+      TopicName: "CTAlertTopic"
+
+  AccountCreationTopic:
+    Type: "AWS::SNS::Topic"
+    Properties: 
+      TopicName: "AccountCreationTopic"
+
+  OUAlertTopic:
+    Type: "AWS::SNS::Topic"
+    Properties: 
+      TopicName: "OUAlertTopic"
+
+  AccountSuspensionTopic:
+    Type: "AWS::SNS::Topic"
+    Properties: 
+      TopicName: "AccountSuspensionTopic"
+
+  # New SNS Topic for Root Login Alerts
+  RootLoginAlertTopic:
+    Type: "AWS::SNS::Topic"
+    Properties: 
+      TopicName: "RootLoginAlertTopic"
+
+  # Lambda function to handle subscriptions
+  SubscriptionHandlerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt SubscriptionHandlerRole.Arn
+      Code:
+        ZipFile: |
+          import cfnresponse
+          import boto3
+          
+          def handler(event, context):
+              sns = boto3.client('sns')
+              
+              if event['RequestType'] in ['Create', 'Update']:
+                  try:
+                      topic_arn = event['ResourceProperties']['TopicArn']
+                      emails = event['ResourceProperties']['Emails'].split(',')
+                      
+                      for email in emails:
+                          sns.subscribe(
+                              TopicArn=topic_arn,
+                              Protocol='email',
+                              Endpoint=email.strip()
+                          )
+                      
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                  except Exception as e:
+                      cfnresponse.send(event, context, cfnresponse.FAILED, {"Error": str(e)})
+              else:
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+      Runtime: python3.8
+      Timeout: 60
+
+  # IAM Role for the Lambda function
+  SubscriptionHandlerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: SNSSubscriptionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sns:Subscribe
+                Resource: '*'
+        - PolicyName: CloudWatchLogsPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: arn:aws:logs:*:*:*
+
+  # Custom resources to handle subscriptions
+  CTAlertTopicSubscriptions:
+    Type: Custom::SNSSubscription
+    Properties:
+      ServiceToken: !GetAtt SubscriptionHandlerFunction.Arn
+      TopicArn: !Ref CTAlertTopic
+      Emails: !Ref NotificationEmail
+
+  AccountCreationTopicSubscriptions:
+    Type: Custom::SNSSubscription
+    Properties:
+      ServiceToken: !GetAtt SubscriptionHandlerFunction.Arn
+      TopicArn: !Ref AccountCreationTopic
+      Emails: !Ref NotificationEmail
+
+  OUAlertTopicSubscriptions:
+    Type: Custom::SNSSubscription
+    Properties:
+      ServiceToken: !GetAtt SubscriptionHandlerFunction.Arn
+      TopicArn: !Ref OUAlertTopic
+      Emails: !Ref NotificationEmail
+
+  AccountSuspensionTopicSubscriptions:
+    Type: Custom::SNSSubscription
+    Properties:
+      ServiceToken: !GetAtt SubscriptionHandlerFunction.Arn
+      TopicArn: !Ref AccountSuspensionTopic
+      Emails: !Ref NotificationEmail
+
+  RootLoginAlertTopicSubscriptions:
+    Type: Custom::SNSSubscription
+    Properties:
+      ServiceToken: !GetAtt SubscriptionHandlerFunction.Arn
+      TopicArn: !Ref RootLoginAlertTopic
+      Emails: !Ref NotificationEmail
 
   # Lambda Execution Role
   LambdaExecutionRole:
@@ -132,14 +251,6 @@ Resources:
       Principal: "events.amazonaws.com"
       SourceArn: !GetAtt DailyTrigger.Arn
 
-  # New SNS Topic for Account Creation Alerts
-  AccountCreationTopic:
-    Type: "AWS::SNS::Topic"
-    Properties: 
-      Subscription:
-        - Endpoint: !Ref NotificationEmail
-          Protocol: "email"
-
   # New Lambda Function for Account Creation Alerts
   AccountCreationLambda:
     Type: "AWS::Lambda::Function"
@@ -240,14 +351,6 @@ Resources:
       FunctionName: !Ref AccountCreationLambda
       Principal: "events.amazonaws.com"
       SourceArn: !GetAtt AccountCreationEventRule.Arn
-
-  # New SNS Topic for OU Alerts
-  OUAlertTopic:
-    Type: "AWS::SNS::Topic"
-    Properties: 
-      Subscription:
-        - Endpoint: !Ref NotificationEmail
-          Protocol: "email"
 
   # New Lambda Function for OU Alerts
   OUAlertLambda:
@@ -372,14 +475,6 @@ Resources:
       Principal: "events.amazonaws.com"
       SourceArn: !GetAtt OUEventRule.Arn
 
-  # New SNS Topic for Account Suspension Alerts
-  AccountSuspensionTopic:
-    Type: "AWS::SNS::Topic"
-    Properties: 
-      Subscription:
-        - Endpoint: !Ref NotificationEmail
-          Protocol: "email"
-
   # New Lambda Function for Account Suspension Alerts
   AccountSuspensionLambda:
     Type: "AWS::Lambda::Function"
@@ -482,6 +577,98 @@ Resources:
       Principal: "events.amazonaws.com"
       SourceArn: !GetAtt AccountSuspensionEventRule.Arn
 
+  # New Lambda Function for Root Login Alerts
+  RootLoginAlertLambda:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      FunctionName: "RootLoginAlertFunction"
+      Handler: "index.lambda_handler"
+      Role: !GetAtt RootLoginAlertLambdaRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import os
+
+          sns_client = boto3.client('sns')
+
+          def lambda_handler(event, context):
+              print(f"Received event: {json.dumps(event)}")
+              
+              account_id = event['detail']['userIdentity']['accountId']
+              event_time = event['detail']['eventTime']
+              
+              message = f"Alert: Root user login detected\nAccount ID: {account_id}\nTime: {event_time}"
+              
+              sns_client.publish(
+                  TopicArn=os.environ['SNS_TOPIC_ARN'],
+                  Message=message,
+                  Subject="Root User Login Alert"
+              )
+              
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps('Notification sent for root user login.')
+              }
+      Runtime: "python3.12"
+      Timeout: 60
+      MemorySize: 128
+      Environment:
+        Variables:
+          SNS_TOPIC_ARN: !Ref RootLoginAlertTopic
+
+  # IAM Role for Root Login Alert Lambda
+  RootLoginAlertLambdaRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "lambda.amazonaws.com"
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: "RootLoginAlertLambdaPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                  - "sns:Publish"
+                Resource: "*"
+
+  # EventBridge Rule for Root Login Events
+  RootLoginEventRule:
+    Type: "AWS::Events::Rule"
+    Properties:
+      Description: "Capture Root User Login Events"
+      EventPattern:
+        detail-type:
+          - "AWS Console Sign In via CloudTrail"
+        detail:
+          userIdentity:
+            type:
+              - "Root"
+          eventType:
+              - "AwsConsoleSignIn"
+      State: "ENABLED"
+      Targets:
+        - Arn: !GetAtt RootLoginAlertLambda.Arn
+          Id: "RootLoginAlertLambdaTarget"
+
+  # Permission for EventBridge to invoke the Lambda function
+  RootLoginAlertLambdaPermission:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !Ref RootLoginAlertLambda
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt RootLoginEventRule.Arn
+
 Outputs:
   LambdaFunction:
     Description: "RSS Lambda Function"
@@ -514,3 +701,11 @@ Outputs:
   AccountSuspensionLambda:
     Description: "Lambda Function for Account Suspension Alerts"
     Value: !Ref AccountSuspensionLambda
+
+  RootLoginAlertTopic:
+    Description: "SNS Topic ARN for Root Login Alerts"
+    Value: !Ref RootLoginAlertTopic
+
+  RootLoginAlertLambda:
+    Description: "Lambda Function for Root Login Alerts"
+    Value: !Ref RootLoginAlertLambda
