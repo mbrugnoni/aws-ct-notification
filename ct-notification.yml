@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Control Tower Notification solution for easily setting up alerts for Control Tower events
+Description: Control Tower Notification Center for easily setting up alerts for important Control Tower events
 
 Parameters:
   NotificationEmail:
@@ -8,7 +8,7 @@ Parameters:
     AllowedPattern: '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(,[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})*$'
     ConstraintDescription: Must be a comma-separated list of valid email addresses
 
-  # New parameters for alert subscriptions
+  # Parameters for alert subscriptions
   SubscribeToCTAlerts:
     Type: String
     Description: Subscribe to Control Tower update alerts?
@@ -50,7 +50,7 @@ Parameters:
     Default: "Yes"
 
 Resources:
-  # SNS Topics (without subscriptions)
+  # SNS Topics
   CTAlertTopic:
     Type: "AWS::SNS::Topic"
     Properties: 
@@ -71,7 +71,7 @@ Resources:
     Properties: 
       TopicName: "AccountSuspensionTopic"
 
-  # New SNS Topic for Root Login Alerts
+  # SNS Topic for Root Login Alerts
   RootLoginAlertTopic:
     Type: "AWS::SNS::Topic"
     Properties: 
@@ -294,7 +294,7 @@ Resources:
       Principal: "events.amazonaws.com"
       SourceArn: !GetAtt DailyTrigger.Arn
 
-  # New Lambda Function for Account Creation Alerts
+  # Lambda Function for Account Creation Alerts
   AccountCreationLambda:
     Type: "AWS::Lambda::Function"
     Properties:
@@ -395,7 +395,7 @@ Resources:
       Principal: "events.amazonaws.com"
       SourceArn: !GetAtt AccountCreationEventRule.Arn
 
-  # New Lambda Function for OU Alerts
+  # Lambda Function for OU Alerts
   OUAlertLambda:
     Type: "AWS::Lambda::Function"
     Properties:
