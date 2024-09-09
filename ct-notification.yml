@@ -8,6 +8,47 @@ Parameters:
     AllowedPattern: '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(,[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})*$'
     ConstraintDescription: Must be a comma-separated list of valid email addresses
 
+  # New parameters for alert subscriptions
+  SubscribeToCTAlerts:
+    Type: String
+    Description: Subscribe to Control Tower update alerts?
+    AllowedValues: 
+      - "Yes"
+      - "No"
+    Default: "Yes"
+
+  SubscribeToAccountCreation:
+    Type: String
+    Description: Subscribe to account creation alerts?
+    AllowedValues: 
+      - "Yes"
+      - "No"
+    Default: "Yes"
+
+  SubscribeToOUAlerts:
+    Type: String
+    Description: Subscribe to OU creation/deletion alerts?
+    AllowedValues: 
+      - "Yes"
+      - "No"
+    Default: "Yes"
+
+  SubscribeToAccountSuspension:
+    Type: String
+    Description: Subscribe to account suspension alerts?
+    AllowedValues: 
+      - "Yes"
+      - "No"
+    Default: "Yes"
+
+  SubscribeToRootLoginAlerts:
+    Type: String
+    Description: Subscribe to management account root user login alerts?
+    AllowedValues: 
+      - "Yes"
+      - "No"
+    Default: "Yes"
+
 Resources:
   # SNS Topics (without subscriptions)
   CTAlertTopic:
@@ -53,17 +94,19 @@ Resources:
               if event['RequestType'] in ['Create', 'Update']:
                   try:
                       topic_arn = event['ResourceProperties']['TopicArn']
-                      emails = event['ResourceProperties']['Emails'].split(',')
+                      emails = event['ResourceProperties']['Emails']
                       
-                      for email in emails:
-                          sns.subscribe(
-                              TopicArn=topic_arn,
-                              Protocol='email',
-                              Endpoint=email.strip()
-                          )
+                      if emails:  # Only attempt to subscribe if emails are provided
+                          for email in emails.split(','):
+                              sns.subscribe(
+                                  TopicArn=topic_arn,
+                                  Protocol='email',
+                                  Endpoint=email.strip()
+                              )
                       
                       cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
                   except Exception as e:
+                      print(f"Error: {str(e)}")
                       cfnresponse.send(event, context, cfnresponse.FAILED, {"Error": str(e)})
               else:
                   cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
@@ -107,35 +150,35 @@ Resources:
     Properties:
       ServiceToken: !GetAtt SubscriptionHandlerFunction.Arn
       TopicArn: !Ref CTAlertTopic
-      Emails: !Ref NotificationEmail
+      Emails: !If [SubscribeToCTAlertsCondition, !Ref NotificationEmail, '']
 
   AccountCreationTopicSubscriptions:
     Type: Custom::SNSSubscription
     Properties:
       ServiceToken: !GetAtt SubscriptionHandlerFunction.Arn
       TopicArn: !Ref AccountCreationTopic
-      Emails: !Ref NotificationEmail
+      Emails: !If [SubscribeToAccountCreationCondition, !Ref NotificationEmail, '']
 
   OUAlertTopicSubscriptions:
     Type: Custom::SNSSubscription
     Properties:
       ServiceToken: !GetAtt SubscriptionHandlerFunction.Arn
       TopicArn: !Ref OUAlertTopic
-      Emails: !Ref NotificationEmail
+      Emails: !If [SubscribeToOUAlertsCondition, !Ref NotificationEmail, '']
 
   AccountSuspensionTopicSubscriptions:
     Type: Custom::SNSSubscription
     Properties:
       ServiceToken: !GetAtt SubscriptionHandlerFunction.Arn
       TopicArn: !Ref AccountSuspensionTopic
-      Emails: !Ref NotificationEmail
+      Emails: !If [SubscribeToAccountSuspensionCondition, !Ref NotificationEmail, '']
 
   RootLoginAlertTopicSubscriptions:
     Type: Custom::SNSSubscription
     Properties:
       ServiceToken: !GetAtt SubscriptionHandlerFunction.Arn
       TopicArn: !Ref RootLoginAlertTopic
-      Emails: !Ref NotificationEmail
+      Emails: !If [SubscribeToRootLoginAlertsCondition, !Ref NotificationEmail, '']
 
   # Lambda Execution Role
   LambdaExecutionRole:
@@ -668,6 +711,13 @@ Resources:
       FunctionName: !Ref RootLoginAlertLambda
       Principal: "events.amazonaws.com"
       SourceArn: !GetAtt RootLoginEventRule.Arn
+
+Conditions:
+  SubscribeToCTAlertsCondition: !Equals [!Ref SubscribeToCTAlerts, "Yes"]
+  SubscribeToAccountCreationCondition: !Equals [!Ref SubscribeToAccountCreation, "Yes"]
+  SubscribeToOUAlertsCondition: !Equals [!Ref SubscribeToOUAlerts, "Yes"]
+  SubscribeToAccountSuspensionCondition: !Equals [!Ref SubscribeToAccountSuspension, "Yes"]
+  SubscribeToRootLoginAlertsCondition: !Equals [!Ref SubscribeToRootLoginAlerts, "Yes"]
 
 Outputs:
   LambdaFunction:
