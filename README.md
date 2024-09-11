@@ -4,6 +4,8 @@
 
 This CloudFormation template sets up a comprehensive notification system for AWS Control Tower environments. It's designed to help administrative users easily configure and manage alerts for important Control Tower events, enhancing security awareness and operational oversight.
 
+**Important:** This template MUST be deployed in the Control Tower management account.
+
 ## Features
 
 This solution provides alerts for the following events:
